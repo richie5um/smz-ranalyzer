@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Redline Analyzer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+
     <style>
         body {
+            font-family: 'Poppins', sans-serif;
             padding: 20px;
         }
 
@@ -29,18 +33,25 @@
         }
 
         #output {
-            font-family: monospace;
             padding: 10px;
-            background-color: #f5f5f5;
-            border-radius: 4px;
             margin-top: 20px;
             white-space: pre-wrap;
         }
 
+        #output pre {
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+
         .log-entry {
-            margin: 5px 0;
-            padding: 5px;
-            border-bottom: 1px solid #ddd;
+            margin: 12px 0;
+            padding: 12px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+
+        .log-entry h3 {
+            margin-top: 0px;
         }
 
         button {
@@ -71,8 +82,94 @@
             display: block;
             margin: 5px 0;
         }
+
+        .diff-added {
+            background-color: #90EE90;
+            padding: 2px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .diff-removed {
+            background-color: #FFB6C1;
+            padding: 2px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .diff-container {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fcfcfc;
+        }
+
+        .diff-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-icon {
+            display: inline-flex;
+            width: 16px;
+            height: 16px;
+            margin-right: 0;
+            flex-shrink: 0;
+        }
+
+        .status-icon.error {
+            color: #dc2626;
+        }
+
+        .status-icon.success {
+            color: #16a34a;
+        }
+
+        .diff-label span {
+            line-height: 1;
+        }
+
+        .rules-container {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fcfcfc;
+        }
+
+        .rule-item {
+            display: flex;
+            align-items: start;
+            gap: 8px;
+            margin: 8px 0;
+            padding: 4px 0;
+        }
+
+        .rule-icon {
+            display: inline-flex;
+            width: 16px;
+            height: 16px;
+            margin-top: 3px;
+            /* Align with first line of text */
+            color: #666;
+            flex-shrink: 0;
+        }
+
+        .rules-label {
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .rule-text {
+            flex: 1;
+        }
     </style>
 </head>
+
 <body>
     <div id="dropZone">
         <div>Drop JSON files here</div>
@@ -99,12 +196,86 @@
         let aiReview = null;
         let aiReviewRequest = null;
 
+        const successIcon = `
+        <svg xmlns="http://www.w3.org/2000/svg" class="status-icon success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 6L9 17l-5-5"/>
+        </svg>
+        `.trim();
+
+        const errorIcon = `
+        <svg xmlns="http://www.w3.org/2000/svg" class="status-icon error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+        `.trim();
+
+        const ruleIcon = `
+        <svg xmlns="http://www.w3.org/2000/svg" class="rule-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="8" y1="13" x2="16" y2="13"/>
+            <line x1="8" y1="17" x2="16" y2="17"/>
+        </svg>
+        `.trim();
+
+        // Function to compute diff between two strings
+        function computeDiff(oldStr, newStr) {
+            const oldWords = oldStr.split(/\s+/);
+            const newWords = newStr.split(/\s+/);
+            const dp = Array(oldWords.length + 1).fill().map(() => Array(newWords.length + 1).fill(0));
+
+            // Fill the dp table
+            for (let i = 1; i <= oldWords.length; i++) {
+                for (let j = 1; j <= newWords.length; j++) {
+                    if (oldWords[i - 1] === newWords[j - 1]) {
+                        dp[i][j] = dp[i - 1][j - 1] + 1;
+                    } else {
+                        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                    }
+                }
+            }
+
+            // Backtrack to find the changes
+            const diff = [];
+            let i = oldWords.length;
+            let j = newWords.length;
+
+            while (i > 0 || j > 0) {
+                if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
+                    diff.unshift({ type: 'same', value: oldWords[i - 1] });
+                    i--;
+                    j--;
+                } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+                    diff.unshift({ type: 'added', value: newWords[j - 1] });
+                    j--;
+                } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+                    diff.unshift({ type: 'removed', value: oldWords[i - 1] });
+                    i--;
+                }
+            }
+
+            return diff;
+        }
+
+        // Function to create HTML for diff
+        function createDiffHtml(diff) {
+            return diff.map(part => {
+                if (part.type === 'added') {
+                    return `<span class="diff-added">${part.value}</span>`;
+                } else if (part.type === 'removed') {
+                    return `<span class="diff-removed">${part.value}</span>`;
+                } else {
+                    return part.value;
+                }
+            }).join(' ');
+        }
+
         const findParagraphByIndex = (index) => {
             if (index < 0) {
                 return '<NEW PARAGRAPH>';
             }
 
-            if (index >= aiReviewRequest.Paragraphs.length) { // Fixed Length to length
+            if (index >= aiReviewRequest.Paragraphs.length) {
                 return '<ERROR INVALID PARAGRAPH>';
             }
 
@@ -118,6 +289,162 @@
         const sortKeys = (obj) => {
             return Object.keys(obj).sort().reduce((r, k) => ({ ...r, [k]: obj[k] }), {});
         };
+
+        function hasDifferences(str1, str2) {
+            if (!str1 || !str2) return false;
+            const diff = computeDiff(str1, str2);
+            return diff.some(part => part.type === 'added' || part.type === 'removed');
+        }
+
+        function processData() {
+            if (aiReview && aiReviewRequest) {
+                const output = document.getElementById('output');
+                output.innerHTML = '';
+
+                try {
+                    for (let redline of aiReview.Redlines) {
+                        const container = document.createElement('div');
+                        container.className = 'log-entry';
+
+                        container.innerHTML = '<h3>Redline Suggestion</h3>';
+
+                        // Add Rules section before the JSON output
+                        if (redline.Suggestion?.RuleIds?.length) {
+                            const rulesContainer = document.createElement('div');
+                            rulesContainer.className = 'rules-container';
+
+                            const rulesLabel = document.createElement('div');
+                            rulesLabel.className = 'rules-label';
+                            rulesLabel.textContent = 'Rules';
+                            rulesContainer.appendChild(rulesLabel);
+
+                            for (const ruleId of redline.Suggestion.RuleIds) {
+                                const ruleText = findRuleById(ruleId);
+                                if (ruleText) {
+                                    const ruleItem = document.createElement('div');
+                                    ruleItem.className = 'rule-item';
+                                    ruleItem.innerHTML = `
+                                    ${ruleIcon}
+                                    <div class="rule-text">${ruleText}</div>
+                                `;
+                                    rulesContainer.appendChild(ruleItem);
+                                }
+                            }
+
+                            container.appendChild(rulesContainer);
+                        }
+
+                        // First compute the full output object
+                        let outputObj = sortKeys({
+                            ...redline.Suggestion,
+                            Paragraph: findParagraphByIndex(redline.Suggestion?.ParagraphId),
+                            RelatedParagraphs: redline.Suggestion.RelatedParagraphIds.map(x => findParagraphByIndex(x)),
+                            Rules: redline.Suggestion.RuleIds.map(x => findRuleById(x))
+                        });
+
+                        const isNewParagraph = redline.Suggestion?.ParagraphId < 0;
+
+                        if (isNewParagraph) {
+                            // Show status for new paragraph
+                            const statusContainer = document.createElement('div');
+                            statusContainer.className = 'diff-container';
+                            const statusLabel = document.createElement('div');
+                            statusLabel.className = 'diff-label';
+                            statusLabel.innerHTML = `${successIcon} SuggestedText is new`;
+                            statusContainer.appendChild(statusLabel);
+                            container.appendChild(statusContainer);
+
+                            // Show suggested text all in green
+                            if (redline.Suggestion?.SuggestedText) {
+                                const diffContainer = document.createElement('div');
+                                diffContainer.className = 'diff-container';
+
+                                const subtitle = document.createElement('div');
+                                subtitle.className = 'diff-label';
+                                subtitle.textContent = 'SuggestedText: New';
+                                diffContainer.appendChild(subtitle);
+
+                                // Wrap all words in green spans
+                                // const words = redline.Suggestion.SuggestedText.split(/\s+/);
+                                // const greenContent = words
+                                //     .map(word => `<span class="diff-added">${word}</span>`)
+                                //     .join(' ');
+                                // diffContainer.innerHTML += greenContent;
+
+                                diffContainer.innerHTML += `<span class="diff-added">${redline.Suggestion.SuggestedText}</span>`                                
+                                container.appendChild(diffContainer);
+                            }
+                        } else {
+                            // Existing paragraph handling
+                            if (redline.Suggestion?.OriginalText && outputObj.Paragraph) {
+                                const hasParagraphDiff = hasDifferences(
+                                    redline.Suggestion.OriginalText,
+                                    outputObj.Paragraph
+                                );
+
+                                const diffContainer = document.createElement('div');
+                                diffContainer.className = 'diff-container';
+
+                                const subtitle = document.createElement('div');
+                                subtitle.className = 'diff-label';
+                                if (hasParagraphDiff) {
+                                    subtitle.innerHTML = `${errorIcon} Problem: Original Text differs to mapped Paragraph`;
+
+                                    const diff = computeDiff(
+                                        redline.Suggestion.OriginalText,
+                                        outputObj.Paragraph
+                                    );
+
+                                    diffContainer.appendChild(subtitle);
+                                    diffContainer.innerHTML += createDiffHtml(diff);
+                                    container.appendChild(diffContainer);
+                                } else {
+                                    subtitle.innerHTML = `${successIcon} Original Text matches mapped Paragraph`;
+                                    diffContainer.appendChild(subtitle);
+                                    container.appendChild(diffContainer);
+                                }
+                            }
+
+                            // Show normal diff for suggested text changes
+                            if (redline.Suggestion?.OriginalText && redline.Suggestion?.SuggestedText) {
+                                const hasSuggestedDiff = hasDifferences(
+                                    redline.Suggestion.OriginalText,
+                                    redline.Suggestion.SuggestedText
+                                );
+
+                                if (hasSuggestedDiff) {
+                                    const diffContainer = document.createElement('div');
+                                    diffContainer.className = 'diff-container';
+
+                                    const subtitle = document.createElement('div');
+                                    subtitle.className = 'diff-label';
+                                    subtitle.textContent = 'SuggestedText: Change';
+                                    diffContainer.appendChild(subtitle);
+
+                                    const diff = computeDiff(
+                                        redline.Suggestion.OriginalText,
+                                        redline.Suggestion.SuggestedText
+                                    );
+
+                                    diffContainer.innerHTML += createDiffHtml(diff);
+                                    container.appendChild(diffContainer);
+                                }
+                            }
+
+                        }
+
+                        // Add the full JSON output
+                        const pre = document.createElement('pre');
+                        pre.textContent = JSON.stringify(outputObj, null, 2);
+                        container.appendChild(pre);
+
+                        output.appendChild(container);
+                    }
+                } catch (error) {
+                    output.innerHTML += `<div class="log-entry">Error processing data: ${error.message}</div>`;
+                }
+            }
+        }
 
         function processFile(file, isAiReview) {
             return new Promise((resolve, reject) => {
@@ -154,47 +481,6 @@
             processData();
         }
 
-        function processData() {
-            if (aiReview && aiReviewRequest) {
-                // Clear previous output
-                const output = document.getElementById('output');
-                output.innerHTML = '';
-
-                // Override console.log to output to our div
-                const originalConsoleLog = console.log;
-                console.log = function() {
-                    const args = Array.from(arguments);
-                    const logEntry = document.createElement('div');
-                    logEntry.className = 'log-entry';
-                    logEntry.textContent = args.join(' ');
-                    output.appendChild(logEntry);
-                    originalConsoleLog.apply(console, arguments);
-                };
-
-                try {
-                    for(let redline of aiReview.Redlines) {
-                        console.log('## RedlineSuggestion');
-
-                        let output = sortKeys({
-                            ...redline.Suggestion,
-                            Paragraph: findParagraphByIndex(redline.Suggestion?.ParagraphId),
-                            RelatedParagraphs: redline.Suggestion.RelatedParagraphIds.map(x => findParagraphByIndex(x)),
-                            Rules: redline.Suggestion.RuleIds.map(x => findRuleById(x))
-                        });
-
-                        console.log(JSON.stringify(output, null, 2));
-                        console.log('-----');
-                    }
-                } catch (error) {
-                    console.log('Error processing data:', error.message);
-                }
-
-                // Restore original console.log
-                console.log = originalConsoleLog;
-            }
-        }
-
-        // Drag and drop handlers
         const dropZone = document.getElementById('dropZone');
 
         dropZone.addEventListener('dragover', (e) => {
@@ -217,7 +503,6 @@
             handleFiles(files);
         });
 
-        // File input handlers
         document.getElementById('aiReviewFile').addEventListener('change', (e) => {
             const files = Array.from(e.target.files);
             handleFiles(files);
@@ -228,7 +513,6 @@
             handleFiles(files);
         });
 
-        // Clear button functionality
         document.getElementById('clearButton').addEventListener('click', () => {
             aiReview = null;
             aiReviewRequest = null;
@@ -240,4 +524,5 @@
         });
     </script>
 </body>
+
 </html>
